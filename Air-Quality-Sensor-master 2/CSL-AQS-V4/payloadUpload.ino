@@ -20,28 +20,35 @@ void payloadUpload(String payload) {
       // URL encode the payload
       String encodedPayload = urlEncode(payload);
       
-      // Make a HTTP request:
-      client.println("GET /airquality/?gsid=" + String(gsidg) + "&payload=" + encodedPayload + " HTTP/1.1");
-      client.println("Host: annie1212011.github.io");
-      client.println("User-Agent: Arduino/1.0");
-      client.println("Connection: close");
-      client.println();
+      // Use Netlify Function as proxy
+      char netlifyServer[] = "your-site-name.netlify.app"; // Replace with your actual Netlify site name
       
-      delay(200);
+      if (client.connectSSL(netlifyServer, 443)) {
+        Serial.println("Connected to Netlify");
+        
+        // Make HTTP request to Netlify function
+        client.println("GET /api/proxy?gsid=" + String(gsidg) + "&payload=" + encodedPayload + " HTTP/1.1");
+        client.println("Host: " + String(netlifyServer));
+        client.println("User-Agent: Arduino/1.0");
+        client.println("Connection: close");
+        client.println();
+        
+        delay(200);
 
-      if (client.available())
-        Serial.println("Response: ");
-      while (client.available()) {
-        char c = client.read();
-        Serial.write(c);
+        if (client.available())
+          Serial.println("Response: ");
+        while (client.available()) {
+          char c = client.read();
+          Serial.write(c);
+        }
+
+        client.stop();
+        if (!client.connected()) {
+          Serial.println("disconnected from server");
+        };
+        WiFi.end();
+        break;
       }
-
-      client.stop();
-      if (!client.connected()) {
-        Serial.println("disconnected from server");
-      };
-      WiFi.end();
-      break;
     }
     else {
       Serial.print("Trying to connect to Wifi : "); Serial.println(i);
@@ -74,9 +81,28 @@ String urlEncode(String str) {
     c = str.charAt(i);
     if (c == ' ') {
       encodedString += '+';
-    } else if (isAlphaNumeric(c)) {
+    } else if (c == '\"') {
+      // Properly encode double quotes
+      encodedString += "%22";
+    } else if (c == '{' || c == '}' || c == ',' || c == ':') {
+      // Properly encode JSON structural characters
+      code1 = (c & 0xf) + '0';
+      if ((c & 0xf) > 9) {
+        code1 = (c & 0xf) - 10 + 'A';
+      }
+      c = (c >> 4) & 0xf;
+      code0 = c + '0';
+      if (c > 9) {
+        code0 = c - 10 + 'A';
+      }
+      encodedString += '%';
+      encodedString += code0;
+      encodedString += code1;
+    } else if (isAlphaNumeric(c) || c == '.' || c == '-' || c == '_') {
+      // Safe characters that don't need encoding
       encodedString += c;
     } else {
+      // All other characters
       code1 = (c & 0xf) + '0';
       if ((c & 0xf) > 9) {
         code1 = (c & 0xf) - 10 + 'A';
