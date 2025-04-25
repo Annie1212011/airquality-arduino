@@ -21,7 +21,7 @@ void payloadUpload(String payload) {
       String encodedPayload = urlEncode(payload);
       
       // Make a HTTP request:
-      client.println("GET /airquality?gsid=" + String(gsidg) + "&payload=" + encodedPayload + " HTTP/1.1");
+      client.println("GET /airquality/?gsid=" + String(gsidg) + "&payload=" + encodedPayload + " HTTP/1.1");
       client.println("Host: annie1212011.github.io");
       client.println("User-Agent: Arduino/1.0");
       client.println("Connection: close");
