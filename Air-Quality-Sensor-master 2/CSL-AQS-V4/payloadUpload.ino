@@ -17,7 +17,7 @@ void payloadUpload(String payload) {
       payload = payload_base + String("\"") + payload + String("\"}");
       Serial.println(payload);
       // Make a HTTP request:
-      client.println(String("GET /airquality/?gsid=") + String(gsidg) + String(" HTTP/1.1"));
+      client.println(String("POST /airquality/?gsid=") + String(gsidg) + String(" HTTP/1.1"));
       client.println("Host: https://annie1212011.github.io");
       client.println("Content-Type: application/x-www-form-urlencoded");
       //client.println("Connection: close");
