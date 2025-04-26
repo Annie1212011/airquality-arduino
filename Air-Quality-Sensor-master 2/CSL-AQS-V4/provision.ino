@@ -107,13 +107,26 @@ void AP_getInfo(String &ssid, String &passcode, String &gsid) {
   // make AP with string+MAC address
   makeMACssidAP("csl");
 
-  // wait for connection:
+  // Wait a moment for AP to initialize
   delay(1000);
+  
+  // Start the server BEFORE client connects
+  Serial.println(F("Starting server"));
+  server.begin();
+  
   printWiFiStatus();
   
-  // Start the server - THIS IS IMPORTANT
-  server.begin();
-  Serial.println("Server started");
+  // print where to go in a browser:
+  IPAddress ip = WiFi.localIP();
+  Serial.print(F("To provide provisioning info, open a browser at http://"));
+  Serial.println(ip);
+
+  display.clearDisplay();
+  display.setCursor(0, 0);
+  display.println("Provision access");
+  display.print("at http://");
+  display.println(ip);
+  display.display();
 
   while (true) {  // loop to poll connections etc.
     // compare the previous status to the current status
@@ -125,18 +138,6 @@ void AP_getInfo(String &ssid, String &passcode, String &gsid) {
         Serial.print(F("Device connected to AP, MAC address: "));
         WiFi.APClientMacAddress(remoteMac);
         printMacAddress(remoteMac);
-
-        // print where to go in a browser:
-        IPAddress ip = WiFi.localIP();
-        Serial.print(F("To provide provisioning info, open a browser at http://"));
-        Serial.println(ip);
-
-        display.clearDisplay();
-        display.setCursor(0, 0);
-        display.println("Provision access");
-        display.print("at http://");
-        display.println(ip);
-        display.display();
       } else {
         // a device has disconnected from the AP, and we are back in listening mode
         Serial.println(F("Device disconnected from AP"));
@@ -150,63 +151,67 @@ void AP_getInfo(String &ssid, String &passcode, String &gsid) {
     if (client) {                    // if you get a client,
       Serial.println(F("new client"));  // print a message out the serial port
       String currentLine = "";       // make a String to hold incoming data from the client
-      bool currentLineIsBlank = true;
-      unsigned long connectionStart = millis();
-      
-      while (client.connected() && millis() - connectionStart < 5000) {   // loop while the client's connected with timeout
-        if (client.available()) {    // if there's bytes to read from the client,
-          char c = client.read();    // read a byte, then
-          Serial.write(c);           // print it out the serial monitor
-          
-          if (c == '\n' && currentLineIsBlank) {
-            // This is where we send the HTTP response
-            client.println("HTTP/1.1 200 OK");
-            client.println("Content-Type: text/html");
-            client.println("Connection: close");
-            client.println();
-            client.println(webpage_html);
-            break;
-          }
-          
-          if (c == '\n') {
-            // If we get here, we reached the end of a line
-            currentLineIsBlank = true;
-            currentLine = "";
-            
-            // Check if line was a GET request with form data
-            if (currentLine.startsWith("GET /get?")) {
-              int ssidIndx = currentLine.indexOf("SSID=");
-              int passcodeIndx = currentLine.indexOf("passcode=");
-              int gsidIndx = currentLine.indexOf("GSID=");
-              int httpIndx = currentLine.indexOf(" HTTP");
-              
-              if (ssidIndx > 0 && passcodeIndx > 0 && gsidIndx > 0 && httpIndx > 0) {
-                ssid = urlDecode(currentLine.substring(ssidIndx + 5, passcodeIndx - 1));
-                passcode = urlDecode(currentLine.substring(passcodeIndx + 9, gsidIndx - 1));
-                gsid = urlDecode(currentLine.substring(gsidIndx + 5, httpIndx));
+      unsigned long timeout = millis() + 5000; // 5 second timeout
+
+      while (client.connected() && millis() < timeout) {   // loop while the client's connected with timeout
+        if (client.available()) {  // if there's bytes to read from the client,
+          char c = client.read();  // read a byte, then
+          Serial.write(c);         // print it out the serial monitor
+
+          if (c == '\n') {  // if the byte is a newline character
+            // if the current line is blank, you got two newline characters in a row.
+            // that's the end of the client HTTP request, so send a response:
+            if (currentLine.length() == 0) {
+              // HTTP headers always start with a response code (e.g. HTTP/1.1 200 OK)
+              // and a content-type so the client knows what's coming, then a blank line:
+              client.println(F("HTTP/1.1 200 OK"));
+              client.println(F("Content-type:text/html"));
+              client.println();
+              client.print(webpage_html);  // The HTTP response ends with another blank line:
+              client.println();
+              // break out of the while loop:
+              break;                   
+            } else {
+              // if you got a newline, then check and parse currentLine and clear
+              // if current line starts with 'GET' it has the info so parse                                      
+              if (currentLine.startsWith("GET /get?")) {  
+                int ssidIndx = currentLine.indexOf("SSID=");
+                int passcodeIndx = currentLine.indexOf("passcode=");
+                int gsidIndx = currentLine.indexOf("GSID=");
+                int httpIndx = currentLine.indexOf(" HTTP");
                 
-                // Respond with success page
-                client.println("HTTP/1.1 200 OK");
-                client.println("Content-Type: text/html");
-                client.println("Connection: close");
-                client.println();
-                client.println("<html><body><h1>Configuration Saved</h1><p>Your settings have been saved.</p></body></html>");
-                
-                // close the connection
-                client.stop();
-                Serial.println("Form data received and connection closed");
-                WiFi.end();
-                delay(1000);
-                storeinfo(ssid, passcode, gsid);
-                return;
+                if (ssidIndx > 0 && passcodeIndx > 0 && gsidIndx > 0 && httpIndx > 0) {
+                  ssid = urlDecode(currentLine.substring(ssidIndx + 5, passcodeIndx - 1));
+                  passcode = urlDecode(currentLine.substring(passcodeIndx + 9, gsidIndx - 1));
+                  gsid = urlDecode(currentLine.substring(gsidIndx + 5, httpIndx));
+
+                  // Send a success response
+                  client.println(F("HTTP/1.1 200 OK"));
+                  client.println(F("Content-type:text/html"));
+                  client.println();
+                  client.println("<html><body><h1>Settings Saved</h1><p>Your settings have been saved. You can close this page now.</p></body></html>");
+                  
+                  // close the connection:
+                  client.stop();
+                  Serial.println("client disconnected - settings received");
+                  WiFi.end();
+                  delay(1000);
+                  status = WiFi.status();
+                  storeinfo(ssid, passcode, gsid);
+                  return;
+                }
               }
+              currentLine = "";  // if not valid 'GET' just start new line
             }
-          } else if (c != '\r') {
-            // If we get any other character, add it to currentLine
-            currentLineIsBlank = false;
-            currentLine += c;
+          } else if (c != '\r') {  // if you got anything else but a carriage return character,
+            currentLine += c;      // add it to the end of the currentLine
           }
         }
+      }
+      
+      // If we reached timeout
+      if (millis() >= timeout) {
+        Serial.println("Client connection timeout");
       }
       
       // Close the connection

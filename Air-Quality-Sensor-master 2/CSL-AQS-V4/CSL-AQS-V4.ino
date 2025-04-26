@@ -123,7 +123,7 @@ void setup(void) {
 }
 
 //Interrupt Handler
-void A() {
+void A() {  
   force_pro = true;
 }
 
