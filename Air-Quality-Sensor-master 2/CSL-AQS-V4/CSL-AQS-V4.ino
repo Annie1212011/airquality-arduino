@@ -66,7 +66,7 @@ typedef struct {
 FlashStorage(flash_storage, Secrets);
 
 
-char server[] = "harbor-airquality.netlify.app/";  // name address for Google scripts as we are communicationg with the scripg (using DNS)
+char server[] = "harbor-airquality.netlify.app";  // name address for Google scripts as we are communicationg with the scripg (using DNS)
 // these are the commands to be sent to the google script: namely add a row to last in Sheet1 with the values TBD
 String payload_base = "{\"command\":\"appendRow\",\"sheet_name\":\"Sheet1\",\"values\":";
 String payload = "";

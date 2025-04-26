@@ -5,8 +5,6 @@ void payloadUpload(String payload) {
   Serial.println("Attempting to connect to WiFi...");
   Serial.print("SSID: ");
   Serial.println(ssidg);
-  Serial.print("Password length: ");
-  Serial.println(passcodeg.length());
   
   // Initialize WiFi radio
   WiFi.end();
@@ -15,22 +13,20 @@ void payloadUpload(String payload) {
   // Generate the payload only once before connection attempts
   String jsonPayload = payload_base + String("\"") + payload + String("\"}");
   Serial.println("Base payload: " + jsonPayload);
+  
+  // URL encode the payload for transmission
   String encodedPayload = urlEncode(jsonPayload);
   
-  for (int i = 1; i < 4; i++) { // always try to connect to wifi
+  for (int i = 1; i < 4; i++) {
     Serial.print("Connection attempt #");
     Serial.println(i);
     
-    if (passcodeg != "") // if password is not empty
-      status = WiFi.begin(ssidg, passcodeg);
-    else
-      status = WiFi.begin(ssidg);
+    status = WiFi.begin(ssidg, passcodeg);
     
-    // Print the WiFi status code
     Serial.print("WiFi begin status: ");
     Serial.println(status);
     
-    // Wait longer for connection
+    // Wait for connection
     unsigned long startTime = millis();
     while (WiFi.status() != WL_CONNECTED && millis() - startTime < 6000) {
       delay(500);
@@ -42,29 +38,39 @@ void payloadUpload(String payload) {
       Serial.println("Successfully connected to WiFi!");
       IPAddress ip = WiFi.localIP();
       Serial.print("IP Address: ");
-      Serial.print(ip[0]);
-      Serial.print(".");
-      Serial.print(ip[1]);
-      Serial.print(".");
-      Serial.print(ip[2]);
-      Serial.print(".");
+      Serial.print(ip[0]); Serial.print(".");
+      Serial.print(ip[1]); Serial.print(".");
+      Serial.print(ip[2]); Serial.print(".");
       Serial.println(ip[3]);
       
-      // Try connecting to GitHub Pages instead for testing
-      char server[] = "annie1212011.github.io";
-      
-      Serial.print("Attempting to connect to ");
-      Serial.println(server);
+      // Define server
+      char server[] = "harbor-airquality.netlify.app"; // Remove trailing slash
       
       if (client.connectSSL(server, 443)) {
-        Serial.print("Connected successfully to ");
+        Serial.print("Connected to ");
         Serial.println(server);
         
-        // Make HTTP request to GitHub Pages as a test
-        client.print("GET /airquality/?gsid=");
-        client.print(gsidg);
-        client.print("&payload=");
-        client.print(encodedPayload);
+        // Debug GSID
+        Serial.print("GSID: ");
+        Serial.println(gsidg);
+        
+        // Format the HTTP request - note the spaces in the URL between parameters
+        String requestUrl = "/api/proxy?gsid=" + String(gsidg) + "&payload=" + encodedPayload;
+        Serial.print("Request URL length: ");
+        Serial.println(requestUrl.length());
+        
+        // If URL is very long, print just the beginning
+        if (requestUrl.length() > 100) {
+          Serial.print("Request URL (truncated): ");
+          Serial.println(requestUrl.substring(0, 100) + "...");
+        } else {
+          Serial.print("Request URL: ");
+          Serial.println(requestUrl);
+        }
+        
+        // Send the request with proper headers
+        client.print("GET ");
+        client.print(requestUrl);
         client.println(" HTTP/1.1");
         client.print("Host: ");
         client.println(server);
@@ -72,27 +78,47 @@ void payloadUpload(String payload) {
         client.println("Connection: close");
         client.println();
         
-        // Wait for response with timeout
-        unsigned long responseTimeout = millis() + 10000; // 10 second timeout
+        // Wait for response
+        unsigned long responseTimeout = millis() + 10000;
         while (!client.available() && millis() < responseTimeout) {
           delay(100);
         }
 
         if (client.available()) {
-          Serial.println("Response received: ");
-          // Read the entire response
+          Serial.println("Response received:");
+          
+          // Read all headers first
+          String responseHeaders = "";
+          while (client.available()) {
+            String line = client.readStringUntil('\n');
+            responseHeaders += line + "\n";
+            if (line.length() <= 2) { // Empty line signals end of headers
+              break;
+            }
+          }
+          Serial.println(responseHeaders);
+          
+          // Read response body
+          String responseBody = "";
           while (client.available()) {
             char c = client.read();
-            Serial.write(c);
+            responseBody += c;
+          }
+          
+          // Print response body (truncated if too long)
+          if (responseBody.length() > 200) {
+            Serial.println(responseBody.substring(0, 200) + "...");
+          } else {
+            Serial.println(responseBody);
           }
         } else {
-          Serial.println("No response received within timeout");
+          Serial.println("No response within timeout");
         }
 
         client.stop();
         Serial.println("Connection closed");
         WiFi.end();
-        return; // Exit after successful attempt
+        return;
       } else {
         Serial.print("Failed to connect to ");
         Serial.println(server);
