@@ -1,30 +1,20 @@
-/*
-  Write to Google Sheets through a Netlify Function proxy.
-*/
 void payloadUpload(String payload) {
+  Serial.println("==== STARTING PAYLOAD UPLOAD ====");
   Serial.println("Attempting to connect to WiFi...");
-  Serial.print("SSID: ");
-  Serial.println(ssidg);
   
-  // Initialize WiFi radio
+  // Initialize WiFi
   WiFi.end();
   delay(1000);
   
-  // Generate the payload only once before connection attempts
+  // Generate the payload
   String jsonPayload = payload_base + String("\"") + payload + String("\"}");
   Serial.println("Base payload: " + jsonPayload);
-  
-  // URL encode the payload for transmission
   String encodedPayload = urlEncode(jsonPayload);
   
   for (int i = 1; i < 4; i++) {
-    Serial.print("Connection attempt #");
-    Serial.println(i);
+    Serial.println("Connection attempt #" + String(i));
     
     status = WiFi.begin(ssidg, passcodeg);
-    
-    Serial.print("WiFi begin status: ");
-    Serial.println(status);
     
     // Wait for connection
     unsigned long startTime = millis();
@@ -43,37 +33,27 @@ void payloadUpload(String payload) {
       Serial.print(ip[2]); Serial.print(".");
       Serial.println(ip[3]);
       
-      // Define server
-      char server[] = "harbor-airquality.netlify.app"; // Remove trailing slash
+      // Use non-SSL connection to GitHub Pages
+      WiFiClient client;
+      char githubServer[] = "annie1212011.github.io";
       
-      if (client.connectSSL(server, 443)) {
-        Serial.print("Connected to ");
-        Serial.println(server);
+      Serial.print("Connecting to GitHub Pages: ");
+      Serial.println(githubServer);
+      
+      if (client.connect(githubServer, 80)) {
+        Serial.println("Connected to GitHub Pages");
         
-        // Debug GSID
-        Serial.print("GSID: ");
-        Serial.println(gsidg);
+        // Format the request URL - simple GET request with parameters
+        String requestUrl = "/airquality/?gsid=" + String(gsidg) + "&payload=" + encodedPayload;
         
-        // Format the HTTP request - note the spaces in the URL between parameters
-        String requestUrl = "/api/proxy?gsid=" + String(gsidg) + "&payload=" + encodedPayload;
-        Serial.print("Request URL length: ");
-        Serial.println(requestUrl.length());
+        Serial.println("Sending request: " + requestUrl);
         
-        // If URL is very long, print just the beginning
-        if (requestUrl.length() > 100) {
-          Serial.print("Request URL (truncated): ");
-          Serial.println(requestUrl.substring(0, 100) + "...");
-        } else {
-          Serial.print("Request URL: ");
-          Serial.println(requestUrl);
-        }
-        
-        // Send the request with proper headers
+        // Send the HTTP request
         client.print("GET ");
         client.print(requestUrl);
         client.println(" HTTP/1.1");
         client.print("Host: ");
-        client.println(server);
+        client.println(githubServer);
         client.println("User-Agent: Arduino/1.0");
         client.println("Connection: close");
         client.println();
@@ -84,35 +64,40 @@ void payloadUpload(String payload) {
           delay(100);
         }
 
+        // Read the response (just for logging)
         if (client.available()) {
           Serial.println("Response received:");
           
           // Read all headers first
           String responseHeaders = "";
-          while (client.available()) {
+          bool headerEnded = false;
+          while (client.available() && !headerEnded) {
             String line = client.readStringUntil('\n');
-            responseHeaders += line + "\n";
-            if (line.length() <= 2) { // Empty line signals end of headers
-              break;
+            if (line.length() <= 2) {
+              headerEnded = true;
+            } else {
+              responseHeaders += line + "\n";
             }
           }
           Serial.println(responseHeaders);
           
-          // Read response body
-          String responseBody = "";
-          while (client.available()) {
+          // Read response body (limited)
+          int bodyLength = 0;
+          while (client.available() && bodyLength < 200) {
             char c = client.read();
-            responseBody += c;
+            Serial.write(c);
+            bodyLength++;
           }
           
-          // Print response body (truncated if too long)
-          if (responseBody.length() > 200) {
-            Serial.println(responseBody.substring(0, 200) + "...");
-          } else {
-            Serial.println(responseBody);
+          // If there's more data, just note it but don't print
+          if (client.available()) {
+            Serial.println("(response truncated)");
+            while (client.available()) {
+              client.read(); // Clear the buffer
+            }
           }
         } else {
-          Serial.println("No response within timeout");
+          Serial.println("No response received within timeout");
         }
 
         client.stop();
@@ -120,8 +105,7 @@ void payloadUpload(String payload) {
         WiFi.end();
         return;
       } else {
-        Serial.print("Failed to connect to ");
-        Serial.println(server);
+        Serial.println("Failed to connect to GitHub Pages");
       }
     } else {
       Serial.print("Failed to connect to WiFi. Status: ");
@@ -129,9 +113,8 @@ void payloadUpload(String payload) {
     }
   }
   
-  if (WiFi.status() != WL_CONNECTED) {
-    Serial.println("Continuing without WiFi");
-  }
+  Serial.println("==== PAYLOAD UPLOAD FAILED ====");
+  Serial.println("Continuing without WiFi");
 }
 
 void initializeClient() {
