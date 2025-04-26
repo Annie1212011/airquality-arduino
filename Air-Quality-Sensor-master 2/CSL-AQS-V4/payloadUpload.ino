@@ -9,7 +9,6 @@ void payloadUpload(String payload) {
   // Generate the payload
   String jsonPayload = payload_base + String("\"") + payload + String("\"}");
   Serial.println("Base payload: " + jsonPayload);
-  String encodedPayload = urlEncode(jsonPayload);
   
   for (int i = 1; i < 4; i++) {
     Serial.println("Connection attempt #" + String(i));
@@ -33,30 +32,34 @@ void payloadUpload(String payload) {
       Serial.print(ip[2]); Serial.print(".");
       Serial.println(ip[3]);
       
-      // Use non-SSL connection to GitHub Pages
+      // Connect to script.googleusercontent.com which allows HTTP
       WiFiClient client;
-      char githubServer[] = "annie1212011.github.io";
+      char scriptServer[] = "script.googleusercontent.com";
       
-      Serial.print("Connecting to GitHub Pages: ");
-      Serial.println(githubServer);
+      Serial.print("Connecting to: ");
+      Serial.println(scriptServer);
       
-      if (client.connect(githubServer, 80)) {
-        Serial.println("Connected to GitHub Pages");
+      if (client.connect(scriptServer, 80)) {
+        Serial.println("Connected successfully");
         
-        // Format the request URL - simple GET request with parameters
-        String requestUrl = "/airquality/?gsid=" + String(gsidg) + "&payload=" + encodedPayload;
+        // Format as URL-encoded form data
+        String postData = "payload=" + urlEncode(jsonPayload);
         
-        Serial.println("Sending request: " + requestUrl);
+        // Build the request path - this is the key part that makes it work
+        String path = "/macros/echo?user_content_key=YOUR_USER_CONTENT_KEY"
+                      "&devmode=true&urlfetchtest=true"
+                      "&gsid=" + String(gsidg);
         
-        // Send the HTTP request
-        client.print("GET ");
-        client.print(requestUrl);
-        client.println(" HTTP/1.1");
-        client.print("Host: ");
-        client.println(githubServer);
+        // Send the HTTP POST request
+        client.println("POST " + path + " HTTP/1.1");
+        client.println("Host: " + String(scriptServer));
         client.println("User-Agent: Arduino/1.0");
+        client.println("Content-Type: application/x-www-form-urlencoded");
+        client.print("Content-Length: ");
+        client.println(postData.length());
         client.println("Connection: close");
         client.println();
+        client.println(postData);
         
         // Wait for response
         unsigned long responseTimeout = millis() + 10000;
@@ -64,40 +67,21 @@ void payloadUpload(String payload) {
           delay(100);
         }
 
-        // Read the response (just for logging)
         if (client.available()) {
           Serial.println("Response received:");
           
-          // Read all headers first
-          String responseHeaders = "";
-          bool headerEnded = false;
-          while (client.available() && !headerEnded) {
-            String line = client.readStringUntil('\n');
-            if (line.length() <= 2) {
-              headerEnded = true;
-            } else {
-              responseHeaders += line + "\n";
-            }
-          }
-          Serial.println(responseHeaders);
-          
-          // Read response body (limited)
-          int bodyLength = 0;
-          while (client.available() && bodyLength < 200) {
+          // Read just the first part of the response for debugging
+          for (int i = 0; i < 30 && client.available(); i++) {
             char c = client.read();
             Serial.write(c);
-            bodyLength++;
           }
           
-          // If there's more data, just note it but don't print
+          // Just note if there's more
           if (client.available()) {
-            Serial.println("(response truncated)");
-            while (client.available()) {
-              client.read(); // Clear the buffer
-            }
+            Serial.println("... (response truncated)");
           }
         } else {
-          Serial.println("No response received within timeout");
+          Serial.println("No response within timeout");
         }
 
         client.stop();
@@ -105,7 +89,30 @@ void payloadUpload(String payload) {
         WiFi.end();
         return;
       } else {
-        Serial.println("Failed to connect to GitHub Pages");
+        Serial.println("Failed to connect to server");
+        
+        // Alternative: Try using Webhook.site as a logging service
+        char webhookSite[] = "webhook.site";
+        String webhookID = "YOUR_WEBHOOK_ID"; // Get this from webhook.site
+        
+        if (client.connect(webhookSite, 80)) {
+          Serial.println("Connected to webhook.site for logging");
+          
+          // URL encode the data in the path
+          String requestPath = "/YOUR_WEBHOOK_ID?data=" + urlEncode(jsonPayload);
+          
+          client.println("GET " + requestPath + " HTTP/1.1");
+          client.println("Host: " + String(webhookSite));
+          client.println("Connection: close");
+          client.println();
+          
+          // Wait briefly for response but don't care about content
+          delay(1000);
+          client.stop();
+          Serial.println("Logged data to webhook.site");
+          WiFi.end();
+          return;
+        }
       }
     } else {
       Serial.print("Failed to connect to WiFi. Status: ");
