@@ -1,19 +1,27 @@
+/*
+  Send data to Google Sheets through Pipedream
+*/
 void payloadUpload(String payload) {
-  Serial.println("==== STARTING PAYLOAD UPLOAD ====");
   Serial.println("Attempting to connect to WiFi...");
+  Serial.print("SSID: ");
+  Serial.println(ssidg);
   
-  // Initialize WiFi
+  // Initialize WiFi radio
   WiFi.end();
   delay(1000);
   
-  // Generate the payload
-  String jsonPayload = payload_base + String("\"") + payload + String("\"}");
-  Serial.println("Base payload: " + jsonPayload);
+  // Format the data as JSON
+  String jsonPayload = "{\"data\":[" + payload + "]}";
+  Serial.println("Payload: " + jsonPayload);
   
   for (int i = 1; i < 4; i++) {
-    Serial.println("Connection attempt #" + String(i));
+    Serial.print("Connection attempt #");
+    Serial.println(i);
     
     status = WiFi.begin(ssidg, passcodeg);
+    
+    Serial.print("WiFi begin status: ");
+    Serial.println(status);
     
     // Wait for connection
     unsigned long startTime = millis();
@@ -32,34 +40,25 @@ void payloadUpload(String payload) {
       Serial.print(ip[2]); Serial.print(".");
       Serial.println(ip[3]);
       
-      // Connect to script.googleusercontent.com which allows HTTP
-      WiFiClient client;
-      char scriptServer[] = "script.googleusercontent.com";
+      // Define Pipedream endpoint
+      // Replace with your Pipedream webhook URL
+      char server[] = "endpoint.m.pipedream.net"; 
       
-      Serial.print("Connecting to: ");
-      Serial.println(scriptServer);
-      
-      if (client.connect(scriptServer, 80)) {
-        Serial.println("Connected successfully");
+      if (client.connectSSL(server, 443)) {
+        Serial.print("Connected to ");
+        Serial.println(server);
         
-        // Format as URL-encoded form data
-        String postData = "payload=" + urlEncode(jsonPayload);
-        
-        // Build the request path - this is the key part that makes it work
-        String path = "/macros/echo?user_content_key=YOUR_USER_CONTENT_KEY"
-                      "&devmode=true&urlfetchtest=true"
-                      "&gsid=" + String(gsidg);
-        
-        // Send the HTTP POST request
-        client.println("POST " + path + " HTTP/1.1");
-        client.println("Host: " + String(scriptServer));
+        // Create HTTP POST request
+        client.println("POST /your-pipedream-id HTTP/1.1"); // Replace your-pipedream-id with your actual endpoint ID
+        client.print("Host: ");
+        client.println(server);
         client.println("User-Agent: Arduino/1.0");
-        client.println("Content-Type: application/x-www-form-urlencoded");
+        client.println("Content-Type: application/json");
         client.print("Content-Length: ");
-        client.println(postData.length());
+        client.println(jsonPayload.length());
         client.println("Connection: close");
         client.println();
-        client.println(postData);
+        client.println(jsonPayload); // Send the JSON payload
         
         // Wait for response
         unsigned long responseTimeout = millis() + 10000;
@@ -70,15 +69,29 @@ void payloadUpload(String payload) {
         if (client.available()) {
           Serial.println("Response received:");
           
-          // Read just the first part of the response for debugging
-          for (int i = 0; i < 30 && client.available(); i++) {
+          // Read all headers first
+          String responseHeaders = "";
+          while (client.available()) {
+            String line = client.readStringUntil('\n');
+            responseHeaders += line + "\n";
+            if (line.length() <= 2) { // Empty line signals end of headers
+              break;
+            }
+          }
+          Serial.println(responseHeaders);
+          
+          // Read response body
+          String responseBody = "";
+          while (client.available()) {
             char c = client.read();
-            Serial.write(c);
+            responseBody += c;
           }
           
-          // Just note if there's more
-          if (client.available()) {
-            Serial.println("... (response truncated)");
+          // Print response body (truncated if too long)
+          if (responseBody.length() > 200) {
+            Serial.println(responseBody.substring(0, 200) + "...");
+          } else {
+            Serial.println(responseBody);
           }
         } else {
           Serial.println("No response within timeout");
@@ -89,30 +102,8 @@ void payloadUpload(String payload) {
         WiFi.end();
         return;
       } else {
-        Serial.println("Failed to connect to server");
-        
-        // Alternative: Try using Webhook.site as a logging service
-        char webhookSite[] = "webhook.site";
-        String webhookID = "YOUR_WEBHOOK_ID"; // Get this from webhook.site
-        
-        if (client.connect(webhookSite, 80)) {
-          Serial.println("Connected to webhook.site for logging");
-          
-          // URL encode the data in the path
-          String requestPath = "/YOUR_WEBHOOK_ID?data=" + urlEncode(jsonPayload);
-          
-          client.println("GET " + requestPath + " HTTP/1.1");
-          client.println("Host: " + String(webhookSite));
-          client.println("Connection: close");
-          client.println();
-          
-          // Wait briefly for response but don't care about content
-          delay(1000);
-          client.stop();
-          Serial.println("Logged data to webhook.site");
-          WiFi.end();
-          return;
-        }
+        Serial.print("Failed to connect to ");
+        Serial.println(server);
       }
     } else {
       Serial.print("Failed to connect to WiFi. Status: ");
@@ -120,8 +111,9 @@ void payloadUpload(String payload) {
     }
   }
   
-  Serial.println("==== PAYLOAD UPLOAD FAILED ====");
-  Serial.println("Continuing without WiFi");
+  if (WiFi.status() != WL_CONNECTED) {
+    Serial.println("Continuing without WiFi");
+  }
 }
 
 void initializeClient() {
