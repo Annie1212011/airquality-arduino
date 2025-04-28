@@ -1,27 +1,14 @@
-/*
-  Send data to Google Sheets through Pipedream
-*/
-void payloadUpload(String payload) {
-  Serial.println("Attempting to connect to WiFi...");
-  Serial.print("SSID: ");
-  Serial.println(ssidg);
+void payloadUpload(String sensorData) {
+  Serial.println("==== STARTING PAYLOAD UPLOAD ====");
   
-  // Initialize WiFi radio
+  // Initialize WiFi
   WiFi.end();
   delay(1000);
   
-  // Format the data as JSON
-  String jsonPayload = "{\"data\":[" + payload + "]}";
-  Serial.println("Payload: " + jsonPayload);
-  
   for (int i = 1; i < 4; i++) {
-    Serial.print("Connection attempt #");
-    Serial.println(i);
+    Serial.println("Connection attempt #" + String(i));
     
     status = WiFi.begin(ssidg, passcodeg);
-    
-    Serial.print("WiFi begin status: ");
-    Serial.println(status);
     
     // Wait for connection
     unsigned long startTime = millis();
@@ -33,35 +20,55 @@ void payloadUpload(String payload) {
 
     if (WiFi.status() == WL_CONNECTED) {
       Serial.println("Successfully connected to WiFi!");
-      IPAddress ip = WiFi.localIP();
-      Serial.print("IP Address: ");
-      Serial.print(ip[0]); Serial.print(".");
-      Serial.print(ip[1]); Serial.print(".");
-      Serial.print(ip[2]); Serial.print(".");
-      Serial.println(ip[3]);
       
-      // Define Pipedream endpoint
-      // Replace with your Pipedream webhook URL
-      char server[] = "endpoint.m.pipedream.net"; 
+      // Parse your sensor data
+      // Format from your existing code: Date/Time, CO2, Tco2, RHco2, Tbme, Pbme, RHbme, vbat, status, ...
+      String data = sensorData;
       
-      if (client.connectSSL(server, 443)) {
-        Serial.print("Connected to ");
-        Serial.println(server);
+      // Skip the date/time value (first value)
+      int firstComma = data.indexOf(',');
+      data = data.substring(firstComma + 1);
+      
+      // Parse out individual values
+      String co2Value = getValue(data, ',', 0);
+      String tempValue = getValue(data, ',', 1);
+      String humidityValue = getValue(data, ',', 2);
+      
+      // Skip next 3 values (Tbme, Pbme, RHbme)
+      String voltageValue = getValue(data, ',', 6);
+      String statusValue = getValue(data, ',', 7);
+      
+      // Connect to ThingSpeak
+      WiFiClient client;
+      const char* thingSpeakServer = "api.thingspeak.com";
+      
+      Serial.print("Connecting to ThingSpeak... ");
+      
+      if (client.connect(thingSpeakServer, 80)) {
+        Serial.println("Connected!");
         
-        // Create HTTP POST request
-        client.println("POST /your-pipedream-id HTTP/1.1"); // Replace your-pipedream-id with your actual endpoint ID
-        client.print("Host: ");
-        client.println(server);
-        client.println("User-Agent: Arduino/1.0");
-        client.println("Content-Type: application/json");
-        client.print("Content-Length: ");
-        client.println(jsonPayload.length());
-        client.println("Connection: close");
-        client.println();
-        client.println(jsonPayload); // Send the JSON payload
+        // Your ThingSpeak Write API Key
+        String apiKey = "YOUR_API_KEY_HERE";
+        
+        // Build the request URL
+        String url = "/update?api_key=" + apiKey;
+        url += "&field1=" + co2Value;
+        url += "&field2=" + tempValue;
+        url += "&field3=" + humidityValue;
+        url += "&field4=" + voltageValue;
+        url += "&field5=" + statusValue;
+        
+        // Add more fields as needed for your additional sensor data
+        
+        Serial.println("Sending data to ThingSpeak: " + url);
+        
+        // Send the HTTP request
+        client.print("GET " + url + " HTTP/1.1\r\n");
+        client.print("Host: api.thingspeak.com\r\n");
+        client.print("Connection: close\r\n\r\n");
         
         // Wait for response
-        unsigned long responseTimeout = millis() + 10000;
+        unsigned long responseTimeout = millis() + 5000;
         while (!client.available() && millis() < responseTimeout) {
           delay(100);
         }
@@ -69,29 +76,16 @@ void payloadUpload(String payload) {
         if (client.available()) {
           Serial.println("Response received:");
           
-          // Read all headers first
-          String responseHeaders = "";
-          while (client.available()) {
-            String line = client.readStringUntil('\n');
-            responseHeaders += line + "\n";
-            if (line.length() <= 2) { // Empty line signals end of headers
-              break;
-            }
-          }
-          Serial.println(responseHeaders);
-          
-          // Read response body
-          String responseBody = "";
+          // Read headers
+          String line = "";
           while (client.available()) {
             char c = client.read();
-            responseBody += c;
-          }
-          
-          // Print response body (truncated if too long)
-          if (responseBody.length() > 200) {
-            Serial.println(responseBody.substring(0, 200) + "...");
-          } else {
-            Serial.println(responseBody);
+            if (c == '\n') {
+              Serial.println(line);
+              line = "";
+            } else if (c != '\r') {
+              line += c;
+            }
           }
         } else {
           Serial.println("No response within timeout");
@@ -102,8 +96,7 @@ void payloadUpload(String payload) {
         WiFi.end();
         return;
       } else {
-        Serial.print("Failed to connect to ");
-        Serial.println(server);
+        Serial.println("Failed to connect to ThingSpeak");
       }
     } else {
       Serial.print("Failed to connect to WiFi. Status: ");
@@ -111,11 +104,26 @@ void payloadUpload(String payload) {
     }
   }
   
-  if (WiFi.status() != WL_CONNECTED) {
-    Serial.println("Continuing without WiFi");
-  }
+  Serial.println("==== PAYLOAD UPLOAD FAILED ====");
+  Serial.println("Continuing without WiFi");
 }
 
+// Helper function to parse CSV values
+String getValue(String data, char separator, int index) {
+  int found = 0;
+  int strIndex[] = {0, -1};
+  int maxIndex = data.length()-1;
+
+  for(int i=0; i<=maxIndex && found<=index; i++){
+    if(data.charAt(i)==separator || i==maxIndex){
+        found++;
+        strIndex[0] = strIndex[1]+1;
+        strIndex[1] = (i == maxIndex) ? i+1 : i;
+    }
+  }
+
+  return found>index ? data.substring(strIndex[0], strIndex[1]) : "";
+}
 void initializeClient() {
   char netlifyServer[] = "harbor-airquality.netlify.app";
   
